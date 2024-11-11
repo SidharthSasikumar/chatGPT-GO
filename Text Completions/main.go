@@ -79,7 +79,7 @@ func getCompletion(prompt string, maxTokens int, temperature float64) Completion
 	var completionResponse CompletionResponse
 	err = json.Unmarshal(body, &completionResponse)
 	if err != nil {
-		log.Fatal("Failed to unmarshal response:", err)
+		log.Fatal("Failed to unmarshal response: %v", err)
 	}
 
 	return completionResponse
