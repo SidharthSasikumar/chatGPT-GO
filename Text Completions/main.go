@@ -3,15 +3,18 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"io/ioutil"
+	"errors"
+	"io"
 	"log"
 	"net/http"
+	"os"
+	"time"
 )
 
 const (
-	apiKey     = "API_KEY"
-	apiBaseURL = "https://api.openai.com/v1"
-	chatURL    = apiBaseURL + "/engines/davinci/completions"
+	apiKeyEnvVar = "OPENAI_API_KEY"
+	apiBaseURL   = "https://api.openai.com/v1"
+	chatURL      = apiBaseURL + "/engines/davinci/completions"
 )
 
 type CompletionRequest struct {
@@ -31,20 +34,28 @@ type CompletionResponse struct {
 }
 
 func main() {
+	apiKey := os.Getenv(apiKeyEnvVar)
+	if apiKey == "" {
+		log.Fatal("API key not found in environment variable:", apiKeyEnvVar)
+	}
+
 	prompt := "Once upon a time"
-	maxTokens := 1000
+	maxTokens := 100
 	temperature := 0.7
 
-	completion := getCompletion(prompt, maxTokens, temperature)
-	if len(completion.Choices) > 0 {
-		response := completion.Choices[0].Text
-		log.Println(response)
+	response, err := getCompletion(apiKey, prompt, maxTokens, temperature)
+	if err != nil {
+		log.Fatalf("Error getting completion: %v", err)
+	}
+
+	if len(response.Choices) > 0 {
+		log.Println("Response:", response.Choices[0].Text)
 	} else {
 		log.Println("No completion choices found.")
 	}
 }
 
-func getCompletion(prompt string, maxTokens int, temperature float64) CompletionResponse {
+func getCompletion(apiKey, prompt string, maxTokens int, temperature float64) (CompletionResponse, error) {
 	requestData := CompletionRequest{
 		Prompt:      prompt,
 		MaxTokens:   maxTokens,
@@ -53,34 +64,39 @@ func getCompletion(prompt string, maxTokens int, temperature float64) Completion
 
 	requestBody, err := json.Marshal(requestData)
 	if err != nil {
-		log.Fatal("Failed to marshal request data:", err)
+		return CompletionResponse{}, errors.New("failed to marshal request data: " + err.Error())
 	}
 
-	client := &http.Client{}
+	client := &http.Client{Timeout: 10 * time.Second}
 	req, err := http.NewRequest("POST", chatURL, bytes.NewBuffer(requestBody))
 	if err != nil {
-		log.Fatal("Failed to create request:", err)
+		return CompletionResponse{}, errors.New("failed to create request: " + err.Error())
 	}
 
-	req.Header.Add("Content-Type", "application/json")
-	req.Header.Add("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Fatal("Failed to send request:", err)
+		return CompletionResponse{}, errors.New("failed to send request: " + err.Error())
 	}
 	defer resp.Body.Close()
 
-	body, err := ioutil.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return CompletionResponse{}, errors.New("API error: " + string(body))
+	}
+
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatal("Failed to read response body:", err)
+		return CompletionResponse{}, errors.New("failed to read response body: " + err.Error())
 	}
 
 	var completionResponse CompletionResponse
 	err = json.Unmarshal(body, &completionResponse)
 	if err != nil {
-		log.Fatal("Failed to unmarshal response:", err)
+		return CompletionResponse{}, errors.New("failed to unmarshal response: " + err.Error())
 	}
 
-	return completionResponse
+	return completionResponse, nil
 }
